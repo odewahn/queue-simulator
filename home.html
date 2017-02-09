@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="https://www.gstatic.com/charts/loader.js"></script>
+    <script
+       src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js">
+    </script>
+    
+    <script type="text/javascript">
+$(function(){
+      
+    // === form handling: no regular form submission, instead do AJAX post
+    var form = document.forms["params"];      
+    form.addEventListener("submit", function( evt ) {
+	evt.preventDefault();
+	$.post( "http://localhost:8080/put", { "val": form["vals"].value } );
+    });
+
+
+    // === define default or starting options for graph
+    var opts = { width: 800, height: 400,
+                 chartArea: { left:'10%', top:'10%', width:'80%', height:'80%',
+                              backgroundColor: "lightgreen" },
+
+                 legend: { position: 'none' }, 
+                 backgroundColor: { fill: "#DDD",
+				    stroke: "#000", strokeWidth: 3 },
+
+                 lineWidth: 1.5, pointSize: 2, 
+                 colors: [ 'red', 'gold', 'blue', 'green', 'black' ],
+
+                 series: {}, 
+
+                 hAxis: { gridlines: {color: "white"}, baselineColor:"white",
+                          viewWindow: {min: -20.0, max: 5.0} },
+		 
+                 vAxes: { 0: {title: "Left", baseline: 0,
+                              titleTextStyle: {color: "red",
+                                               italic: false, bold: true},
+                              gridlines: {color: "white"},
+                              viewWindow: {min: -1,max: 1.0} },
+                          1: {title: "Right", baseline: 1000,
+                              titleTextStyle: {color: "blue",
+                                               italic: false, bold: true},
+                              gridlines: {color: "lightgreen"},
+                              viewWindow: {min: -0, max: 1}}	  
+			}
+               };
+
+
+    // === call server to get static setup configs
+    var numCols;
+    $.get( "http://localhost:8080/setup", function(res, status) {
+        var cfg = JSON.parse(res);
+
+        opts.hAxis.viewWindow = cfg["Horiz"];
+
+        numCols = cfg["ColumnAxes"].length;
+	for( k=0; k<numCols; k++ ) {
+	    opts.series[k] =  {"targetAxisIndex": cfg["ColumnAxes"][k]};
+	}
+
+	if( cfg["Colors"].length > 0 ) {				       
+	    opts.colors = cfg["Colors"]
+        }
+    } );
+
+
+    // === load Google charts lib and begin polling
+    var chart, buf = [];	      
+    google.charts.load('current', {'packages': ['corechart']});
+    google.charts.setOnLoadCallback( function() {
+        chart = 
+	new google.visualization.LineChart(document.getElementById('graph'));
+
+        // poll for new data whenever the last redraw is finished
+        google.visualization.events.addListener(chart, 'ready', doGet );
+
+	// explicitly make the first call for data and the initial draw
+        doGet();
+		      
+        // initial draw of chart (not here - no data yet!)		    
+//	chart.draw( google.visualization.arrayToDataTable( buf, true ), opts );
+    } );
+    // Google charts, new chart style:
+    // google.charts.load('current', {'packages': ['line']});
+    // new google.charts.Line(document.getElementById('out'));
+
+		
+    // === main handler: poll server, format data, draw graph		
+    function doGet() {
+	$.get( "http://localhost:8080/get", function(res, status) {
+            var msg = JSON.parse(res);
+
+	    // get the display text
+	    document.getElementById("txt").innerHTML = msg["Text"];
+
+	    // get the graph configs
+	    opts.vAxes[0].viewWindow = msg["Ranges"]["Left"];
+	    opts.vAxes[1].viewWindow = msg["Ranges"]["Right"];
+		    
+	    // get the data
+	    buf = buf.concat( msg["Data"] );
+
+	    // adjust for display: subtract most recent timestamp tmx from
+	    // from all timestamps (last col) to create x-value in first col
+  	    tmx = buf[buf.length-1][numCols+1];
+	    for( i=buf.length-1; i>=0; i-- ) {
+	        buf[i][0] = buf[i][numCols+1]-tmx;
+
+	        // truncate data outside of view range
+   	        if( buf[i][0] < opts.hAxis.viewWindow.min ) {
+		    buf = buf.slice(i);
+		    break;
+		}
+	    }
+//	    console.log(buf.length);
+
+            chart.draw(google.visualization.arrayToDataTable(buf,true),opts);
+	} ) }
+});
+    </script>
+</head>
+
+  
+<body>
+
+<div style="margin-left: 40px; font-family: sans-serif">
+<h1>Some chart</h1>
+
+<div id="graph"></div>
+
+<div id="txt" style="margin-top: 25px; margin-bottom: 5px"></div>
+
+<form name="params" action="">
+  <input type="text" name="vals">
+  <input type="submit">
+</form>
+
+<div style="text-size: -2; margin-top: 5px">
+  <b>Format:</b> <i>key</i>=<i>val</i>; separate pairs
+  using semicolons, all whitespace is ignored.<br>
+  All legal keys and their current values are displayed above.</div>
+</div>
+
+</body>
+</html>
+
+
